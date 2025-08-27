@@ -152,8 +152,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Django REST Framework configuration
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
-        # "auth_firebase.authentication.FirebaseAuthentication",  # TODO: Enable after creating Firebase auth
+        "auth_firebase.authentication.FirebaseAuthentication",
+        "rest_framework.authentication.SessionAuthentication",  # Keep for admin interface
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -180,7 +180,7 @@ SPECTACULAR_SETTINGS = {
 # Firebase configuration
 def get_firebase_private_key():
     """Get Firebase private key with proper line ending handling."""
-    key = config("FIREBASE_PRIVATE_KEY", default="", cast=str)
+    key = config("FIREBASE_PRIVATE_KEY", default="")
     return key.replace("\\n", "\n") if key else ""
 
 
@@ -204,6 +204,28 @@ FIREBASE_CONFIG = {
     "client_x509_cert_url": config("FIREBASE_CLIENT_X509_CERT_URL", default=""),
 }
 
+# Initialize Firebase Admin SDK
+try:
+    import firebase_admin
+    from firebase_admin import credentials
+
+    # Only initialize if not already initialized and we have config
+    if len(firebase_admin._apps) == 0 and FIREBASE_CONFIG.get(
+        "project_id"
+    ):  # pylint: disable=protected-access
+        cred = credentials.Certificate(FIREBASE_CONFIG)
+        firebase_admin.initialize_app(cred)
+except ImportError:
+    # Firebase Admin SDK not installed - will use mock authentication
+    pass
+except (ValueError, KeyError) as e:
+    # Firebase configuration error - will use mock authentication in DEBUG mode
+    if DEBUG:
+        print(f"Warning: Firebase initialization failed: {e}")
+        print("Using mock authentication for local development")
+    else:
+        raise
+
 # Local development settings
 if DEBUG:
     INSTALLED_APPS += ["debug_toolbar"]
@@ -214,3 +236,4 @@ if DEBUG:
 
     # Firebase mock for local development
     USE_FIREBASE_MOCK = config("USE_FIREBASE_MOCK", default=True, cast=bool)
+    FIREBASE_MOCK_UID = config("FIREBASE_MOCK_UID", default="test_user_uid_123")

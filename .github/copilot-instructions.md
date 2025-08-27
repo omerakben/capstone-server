@@ -28,6 +28,169 @@ a Django-based developer command center for managing environment variables, prom
 
 ---
 
+## 📋 TODO Management & Workflow Rules
+
+### 🔄 TODO Completion Protocol
+
+**MANDATORY WORKFLOW** when completing any task from `my-docs/server-TODO.md`:
+
+#### 1. **Update TODO Status**
+
+```markdown
+# Before
+
+[ ] be-setup-task-001 [plan] [M] — Initialize Django project with proper structure
+
+# After
+
+[x] be-setup-task-001 [plan] [M] — Initialize Django project with proper structure ✅ COMPLETED
+```
+
+#### 2. **Update Progress Summary**
+
+Update the progress summary section in `server-TODO.md`:
+
+```markdown
+## Progress Summary
+
+**Last Updated**: [Current Date]
+**Completion Status**: X/14 main tasks completed (XX.X%)
+**Recent Completion**: [Task description] ✅
+```
+
+#### 3. **Memory Documentation**
+
+Use `#memory` tools to add observations:
+
+- Task completion details
+- Implementation patterns discovered
+- Lessons learned
+- Architecture decisions made
+
+#### 4. **Pre-Push Quality Checks**
+
+**NEVER PUSH** without completing ALL of these:
+
+✅ **No Lint Warnings**:
+
+```bash
+# Check for Python linting issues
+pylint deadline_api/ workspaces/ artifacts/ auth_firebase/
+# Fix all warnings and errors
+```
+
+✅ **No Type Errors**:
+
+```bash
+# Run type checking with Pylance/mypy
+mypy deadline_api/ --ignore-missing-imports
+```
+
+✅ **Django Checks Pass**:
+
+```bash
+python manage.py check --deploy
+# Resolve all issues before pushing
+```
+
+✅ **Tests Pass**:
+
+```bash
+python manage.py test
+# All tests must pass
+```
+
+✅ **Migrations Clean**:
+
+```bash
+python manage.py makemigrations --check --dry-run
+# No pending migrations
+```
+
+✅ **Import Organization**:
+
+```bash
+# Use isort for import sorting
+isort . --check-only --diff
+```
+
+#### 5. **Commit Message Format**
+
+Use conventional commits with task reference:
+
+```bash
+git commit -m "feat: Complete be-auth-task-001 Firebase authentication
+
+✅ Implemented FirebaseAuthentication class with token verification
+✅ Added IsOwner permission for row-level security
+✅ Created mock authentication for local development
+✅ Added comprehensive error handling and logging
+
+Closes: be-auth-task-001
+Tests: All authentication tests passing
+Lint: No warnings or errors"
+```
+
+### 🧠 Memory Management Rules
+
+#### When to Add Memory
+
+- **Task Completion**: Document what was implemented and how
+- **Architecture Decisions**: Record why specific patterns were chosen
+- **Problem Solutions**: Capture debugging insights and solutions
+- **Pattern Discovery**: Note reusable patterns for future tasks
+
+#### Memory Categories
+
+```python
+# Use these entity types consistently
+"task_completion"     # Completed TODO tasks
+"implementation_pattern"  # Reusable code patterns
+"architecture_decision"   # Design choices made
+"debugging_solution"      # Problem resolution steps
+"performance_optimization" # Speed/efficiency improvements
+```
+
+#### Memory Example
+
+```python
+mcp_memory_create_entities([{
+    "entityType": "task_completion",
+    "name": "be-auth-task-001",
+    "observations": [
+        "Firebase Admin SDK integration completed successfully",
+        "Custom FirebaseAuthentication class extends BaseAuthentication",
+        "Mock authentication implemented for local development",
+        "Row-level security with IsOwner permission class",
+        "Comprehensive error handling for token verification failures"
+    ]
+}])
+```
+
+### 🚫 Pre-Push Blockers
+
+**DO NOT PUSH** if any of these exist:
+
+❌ **Pylance/Linting Errors**: Red squiggly lines in VS Code
+❌ **Django Check Failures**: `python manage.py check` reports issues
+❌ **Test Failures**: Any unit or integration test fails
+❌ **Import Errors**: Unresolved import statements
+❌ **Type Errors**: Incorrect type annotations
+❌ **TODO Inconsistency**: server-TODO.md not updated for completed work
+❌ **Missing Memory**: No memory documentation for significant work
+
+### 📊 Quality Metrics Tracking
+
+Track these metrics for each push:
+
+- **Test Coverage**: Maintain >80% coverage
+- **Lint Score**: 9.0+ pylint score required
+- **Type Coverage**: 100% for new code
+- **Documentation**: All public methods documented
+- **Performance**: No N+1 queries in Django ORM
+
+---
+
 ## Technology Stack
 
 ### Backend Framework

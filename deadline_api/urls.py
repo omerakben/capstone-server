@@ -15,10 +15,11 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    # API endpoints (temporarily commented out until views are created)
-    # path("api/v1/workspaces/", include("workspaces.urls")),
-    # path("api/v1/artifacts/", include("artifacts.urls")),
-    # path("api/v1/auth/", include("auth_firebase.urls")),
+    # API endpoints
+    # Workspace and artifact endpoints will be added after model implementation
+    path(
+        "api/v1/auth/", include("auth_firebase.urls")
+    ),  # Firebase authentication endpoints
     # API documentation
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
