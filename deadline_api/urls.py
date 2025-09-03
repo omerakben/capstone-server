@@ -16,7 +16,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 urlpatterns = [
     path("admin/", admin.site.urls),
     # API endpoints
-    # Workspace and artifact endpoints will be added after model implementation
+    path("api/v1/workspaces/", include("workspaces.urls")),  # Workspace management
     path(
         "api/v1/auth/", include("auth_firebase.urls")
     ),  # Firebase authentication endpoints
