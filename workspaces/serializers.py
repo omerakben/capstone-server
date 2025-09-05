@@ -24,8 +24,8 @@ class WorkspaceSerializer(serializers.ModelSerializer):
     updated_at = serializers.DateTimeField(read_only=True)
     owner_uid = serializers.CharField(read_only=True)
 
-    # Optional field for artifact counts (can be added via prefetch)
-    artifact_counts = serializers.DictField(read_only=True, required=False)
+    # Artifact counts computed from prefetched artifacts
+    artifact_counts = serializers.SerializerMethodField()
 
     class Meta:
         model = Workspace
@@ -44,3 +44,36 @@ class WorkspaceSerializer(serializers.ModelSerializer):
         if not value.strip():
             raise serializers.ValidationError("Workspace name cannot be empty")
         return value.strip()
+
+    def get_artifact_counts(self, obj):
+        """
+        Compute artifact counts by type and environment.
+
+        Returns structured counts leveraging prefetched artifacts
+        to avoid additional database queries.
+        """
+        # Use prefetched artifacts for efficient computation
+        artifacts = obj.artifacts.all()
+
+        # Compute total count
+        total = len(artifacts)
+
+        # Compute counts by artifact type
+        by_type = {
+            "ENV_VAR": len([a for a in artifacts if a.kind == "ENV_VAR"]),
+            "PROMPT": len([a for a in artifacts if a.kind == "PROMPT"]),
+            "DOC_LINK": len([a for a in artifacts if a.kind == "DOC_LINK"]),
+        }
+
+        # Compute counts by environment
+        by_environment = {
+            "DEV": len([a for a in artifacts if a.environment == "DEV"]),
+            "STAGING": len([a for a in artifacts if a.environment == "STAGING"]),
+            "PROD": len([a for a in artifacts if a.environment == "PROD"]),
+        }
+
+        return {
+            "total": total,
+            "by_type": by_type,
+            "by_environment": by_environment,
+        }

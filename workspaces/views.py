@@ -5,9 +5,9 @@ This module provides RESTful API endpoints for workspace CRUD operations
 with Firebase UID-based ownership and proper permission checks.
 """
 
+from rest_framework import viewsets
+
 from auth_firebase.permissions import IsOwner
-from rest_framework import status, viewsets
-from rest_framework.response import Response
 
 from .models import Workspace
 from .serializers import WorkspaceSerializer
@@ -25,18 +25,22 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
     permission_classes = [IsOwner]
 
     def get_queryset(self):
-        """Filter workspaces by authenticated user's UID."""
+        """
+        Filter workspaces by authenticated user's UID.
+
+        Uses prefetch_related to optimize artifact loading and
+        avoid N+1 queries when computing artifact counts.
+        """
         if hasattr(self.request.user, "uid"):
-            return Workspace.objects.filter(owner_uid=self.request.user.uid)
+            return Workspace.objects.filter(
+                owner_uid=self.request.user.uid  # type: ignore
+            ).prefetch_related("artifacts")
         return Workspace.objects.none()
 
     def perform_create(self, serializer):
         """Set owner_uid to authenticated user's UID when creating workspace."""
         if hasattr(self.request.user, "uid"):
-            serializer.save(owner_uid=self.request.user.uid)
+            serializer.save(owner_uid=self.request.user.uid)  # type: ignore
         else:
             # This should not happen with proper authentication
-            return Response(
-                {"error": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+            raise ValueError("Authentication required")
