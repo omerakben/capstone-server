@@ -234,3 +234,6 @@ if DEBUG:
     MIDDLEWARE += ["debug_toolbar.middleware.DebugToolbarMiddleware"]
     INTERNAL_IPS = ["127.0.0.1", "localhost"]
     # Mock auth removed: USE_FIREBASE_MOCK deprecated.
+    # Optional controlled dev bypass (disabled by default) to avoid full Firebase setup in local/E2E
+    # Enable ONLY for local usage: export ALLOW_DEV_FAKE_AUTH=true
+    ALLOW_DEV_FAKE_AUTH = config("ALLOW_DEV_FAKE_AUTH", default=False, cast=bool)

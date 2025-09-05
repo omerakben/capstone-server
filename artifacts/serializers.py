@@ -34,6 +34,8 @@ class ArtifactSerializer(serializers.ModelSerializer):
     title = serializers.CharField(required=False, allow_blank=True)
     content = serializers.CharField(required=False, allow_blank=True)
     url = serializers.URLField(required=False, allow_blank=True)
+    # Virtual field mapped to metadata for DOC_LINK label
+    label = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = Artifact
@@ -53,6 +55,7 @@ class ArtifactSerializer(serializers.ModelSerializer):
             "content",
             "url",
             "metadata",
+            "label",
         ]
 
     def to_representation(self, instance):
@@ -90,6 +93,10 @@ class ArtifactSerializer(serializers.ModelSerializer):
             data.pop("key", None)
             data.pop("value", None)
             data.pop("content", None)
+            # Surface label from metadata if present
+            meta = getattr(instance, "metadata", {}) or {}
+            if isinstance(meta, dict) and meta.get("label"):
+                data["label"] = meta.get("label")
 
         return data
 
@@ -130,8 +137,39 @@ class ArtifactSerializer(serializers.ModelSerializer):
             attrs.pop("key", None)
             attrs.pop("value", None)
             attrs.pop("content", None)
+            # Move optional label into metadata
+            label = attrs.pop("label", None)
+            if label is not None:
+                meta = attrs.get("metadata") or {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                # store trimmed label
+                meta["label"] = str(label).strip()
+                attrs["metadata"] = meta
 
         return attrs
+
+    def update(self, instance, validated_data):
+        # Ensure label is synced into metadata on updates
+        label = validated_data.pop("label", None)
+        if label is not None:
+            meta = instance.metadata or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            meta["label"] = str(label).strip()
+            validated_data["metadata"] = meta
+        return super().update(instance, validated_data)
+
+    def create(self, validated_data):
+        # Ensure label is synced into metadata on creates
+        label = validated_data.pop("label", None)
+        if label is not None:
+            meta = validated_data.get("metadata") or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            meta["label"] = str(label).strip()
+            validated_data["metadata"] = meta
+        return super().create(validated_data)
 
     def validate_key(self, value):
         """Validate ENV_VAR key format."""

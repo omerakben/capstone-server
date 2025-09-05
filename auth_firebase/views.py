@@ -120,7 +120,8 @@ def health_check(request):  # pylint: disable=unused-argument
     health_data = {
         "status": "healthy",
         "firebase_available": FIREBASE_AVAILABLE,
-        "mock_auth_enabled": getattr(settings, "USE_FIREBASE_MOCK", False),
+        # Report newer controlled dev bypass flag if present
+        "mock_auth_enabled": getattr(settings, "ALLOW_DEV_FAKE_AUTH", False),
         "debug_mode": settings.DEBUG,
     }
 

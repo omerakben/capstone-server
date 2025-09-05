@@ -186,7 +186,8 @@ class ArtifactViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(data=duplicate_data)
         if serializer.is_valid():
-            serializer.save()
+            # Ensure workspace is set (serializer field is read-only)
+            serializer.save(workspace=artifact.workspace)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
