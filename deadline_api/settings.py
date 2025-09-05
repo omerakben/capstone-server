@@ -216,24 +216,21 @@ try:
         cred = credentials.Certificate(FIREBASE_CONFIG)
         firebase_admin.initialize_app(cred)
 except ImportError:
-    # Firebase Admin SDK not installed - will use mock authentication
-    pass
-except (ValueError, KeyError) as e:
-    # Firebase configuration error - will use mock authentication in DEBUG mode
-    if DEBUG:
-        print(f"Warning: Firebase initialization failed: {e}")
-        print("Using mock authentication for local development")
-    else:
+    # Firebase Admin SDK not installed – hard fail outside DEBUG
+    if not DEBUG:
         raise
+    else:
+        print("Warning: firebase_admin not installed; authentication will fail.")
+except (ValueError, KeyError) as e:
+    # Configuration error – fail fast if not DEBUG
+    if not DEBUG:
+        raise
+    else:
+        print(f"Warning: Firebase initialization failed (development mode): {e}")
 
 # Local development settings
 if DEBUG:
     INSTALLED_APPS += ["debug_toolbar"]
     MIDDLEWARE += ["debug_toolbar.middleware.DebugToolbarMiddleware"]
-
-    # Show debug toolbar for localhost
     INTERNAL_IPS = ["127.0.0.1", "localhost"]
-
-    # Firebase mock for local development
-    USE_FIREBASE_MOCK = config("USE_FIREBASE_MOCK", default=True, cast=bool)
-    FIREBASE_MOCK_UID = config("FIREBASE_MOCK_UID", default="test_user_uid_123")
+    # Mock auth removed: USE_FIREBASE_MOCK deprecated.
