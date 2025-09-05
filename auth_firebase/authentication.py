@@ -9,7 +9,6 @@ mock authentication for local development.
 import logging
 from typing import Optional, Tuple
 
-from django.conf import settings
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -133,49 +132,15 @@ class FirebaseAuthentication(BaseAuthentication):
         Raises:
             AuthenticationFailed: If token validation fails
         """
-        # Check if mock authentication is enabled
-        if self.should_use_mock_auth():
-            return self.get_mock_user(raw_token)
+        # Mock authentication disabled per project configuration
+        # (Previously supported for local development). Enforce real token verification.
 
         # Use real Firebase authentication
         return self.get_firebase_user(raw_token)
 
-    def should_use_mock_auth(self) -> bool:
-        """
-        Determine if mock authentication should be used.
-
-        Mock auth is used when:
-        1. DEBUG is True AND USE_FIREBASE_MOCK is True
-        2. Firebase Admin SDK is not available
-        """
-        use_mock = getattr(settings, "USE_FIREBASE_MOCK", False)
-        return (settings.DEBUG and use_mock) or not FIREBASE_AVAILABLE
-
-    def get_mock_user(self, raw_token: str) -> Tuple[FirebaseUser, str]:
-        """
-        Create a mock user for local development.
-
-        Args:
-            raw_token: The token (used for custom UID extraction)
-
-        Returns:
-            Tuple of (FirebaseUser, token) with mock UID
-        """
-        # Check for custom test UID in token (for testing different users)
-        if raw_token.startswith("test_uid_"):
-            uid = raw_token
-        else:
-            # Use default test UID
-            uid = getattr(settings, "FIREBASE_MOCK_UID", "test_user_uid_123")
-
-        logger.warning(
-            "🔥 MOCK Firebase Authentication active for UID: %s. "
-            "This should only be used in development!",
-            uid,
-        )
-
-        user = FirebaseUser(uid=uid)
-        return (user, raw_token)
+    # Removed mock authentication helpers (should_use_mock_auth, get_mock_user)
+    # to prevent accidental usage. Any attempt to run without Firebase Admin
+    # now raises an authentication failure.
 
     def get_firebase_user(self, raw_token: str) -> Tuple[FirebaseUser, str]:
         """
@@ -213,7 +178,7 @@ class FirebaseAuthentication(BaseAuthentication):
                 f"Firebase authentication failed: {str(e)}"
             ) from e
 
-    def authenticate_header(self, request):
+    def authenticate_header(self, _request):
         """
         Return the WWW-Authenticate header for unauthenticated responses.
 
