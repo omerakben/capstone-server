@@ -6,6 +6,7 @@ with Firebase UID-based ownership and proper permission checks.
 """
 
 from rest_framework import viewsets
+from rest_framework.permissions import IsAuthenticated
 
 from auth_firebase.permissions import IsOwner
 
@@ -22,7 +23,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = WorkspaceSerializer
-    permission_classes = [IsOwner]
+    permission_classes = [IsAuthenticated, IsOwner]
 
     def get_queryset(self):
         """

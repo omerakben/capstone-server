@@ -18,6 +18,9 @@ urlpatterns = [
     # API endpoints
     path("api/v1/workspaces/", include("workspaces.urls")),  # Workspace management
     path(
+        "api/v1/workspaces/<int:workspace_id>/artifacts/", include("artifacts.urls")
+    ),  # Nested artifact management
+    path(
         "api/v1/auth/", include("auth_firebase.urls")
     ),  # Firebase authentication endpoints
     # API documentation

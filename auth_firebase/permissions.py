@@ -27,24 +27,6 @@ class IsOwner(BasePermission):
             permission_classes = [IsAuthenticated, IsOwner]
     """
 
-    def has_permission(self, request, view):
-        """
-        Check if the user has permission to access the view.
-
-        Args:
-            request: The HTTP request object
-            view: The view being accessed
-
-        Returns:
-            True if user is authenticated with Firebase, False otherwise
-        """
-        # Must be authenticated with Firebase
-        return (
-            request.user
-            and hasattr(request.user, "uid")
-            and request.user.is_authenticated
-        )
-
     def has_object_permission(self, request, view, obj):
         """
         Check if the user has permission to access the specific object.
@@ -62,13 +44,7 @@ class IsOwner(BasePermission):
         Returns:
             True if user owns the object, False otherwise
         """
-        # Must be authenticated with Firebase
-        if not self.has_permission(request, view):
-            logger.warning(
-                "IsOwner permission denied: User not authenticated with Firebase"
-            )
-            return False
-
+        # Authentication is handled by IsAuthenticated permission class
         user_uid = request.user.uid
 
         # Case 1: Direct ownership (e.g., Workspace model)

@@ -1,6 +1,10 @@
+from unittest.mock import patch
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
+from rest_framework import status
+from rest_framework.test import APITestCase
 
 from artifacts.models import (
     Artifact,
@@ -423,3 +427,148 @@ class ArtifactModelTest(TestCase):
         artifacts = Artifact.objects.all()
         self.assertEqual(artifacts[0], second_artifact)  # Most recent first
         self.assertEqual(artifacts[1], first_artifact)  # Older second
+
+
+class ArtifactViewSetTest(APITestCase):
+    """Test Artifact ViewSet API endpoints with Firebase authentication and nested routing."""
+
+    def setUp(self):
+        """Set up test data and mock Firebase authentication."""
+        self.test_user_uid = "test_user_uid_123"
+        self.other_user_uid = "other_user_uid_456"
+
+        # Create test workspaces
+        self.user_workspace = Workspace.objects.create(
+            name="User Workspace",
+            description="Test workspace for authenticated user",
+            owner_uid=self.test_user_uid,
+        )
+
+        self.other_workspace = Workspace.objects.create(
+            name="Other Workspace",
+            description="Test workspace for different user",
+            owner_uid=self.other_user_uid,
+        )
+
+        # Create test artifacts for testing
+        self.create_test_artifacts()
+
+    def create_test_artifacts(self):
+        """Create sample artifacts for testing."""
+        # ENV_VAR artifacts in different environments
+        self.env_var_dev = Artifact.objects.create(
+            workspace=self.user_workspace,
+            kind="ENV_VAR",
+            environment="DEV",
+            key="API_KEY",
+            value="dev_api_key_value",
+            notes="Development API key",
+        )
+
+        self.env_var_prod = Artifact.objects.create(
+            workspace=self.user_workspace,
+            kind="ENV_VAR",
+            environment="PROD",
+            key="API_KEY",
+            value="prod_api_key_value",
+            notes="Production API key",
+        )
+
+        # PROMPT artifacts
+        self.prompt_dev = Artifact.objects.create(
+            workspace=self.user_workspace,
+            kind="PROMPT",
+            environment="DEV",
+            title="Bug Report Template",
+            content="Report bug: {{description}}\n\nSteps:\n{{steps}}",
+            notes="Standard bug report format",
+        )
+
+        # DOC_LINK artifacts
+        self.doc_link_dev = Artifact.objects.create(
+            workspace=self.user_workspace,
+            kind="DOC_LINK",
+            environment="DEV",
+            title="Django Documentation",
+            url="https://docs.djangoproject.com",
+            notes="Official Django docs",
+        )
+
+        # Artifact in other user's workspace
+        self.other_artifact = Artifact.objects.create(
+            workspace=self.other_workspace,
+            kind="ENV_VAR",
+            environment="DEV",
+            key="OTHER_KEY",
+            value="other_value",
+        )
+
+    def authenticate_user(self):
+        """Helper method to authenticate user for tests."""
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer fake_token")
+
+    def get_artifact_url(self, workspace_id=None, artifact_id=None):
+        """Helper to build artifact URLs."""
+        workspace_id = workspace_id or self.user_workspace.id
+        base_url = f"/api/v1/workspaces/{workspace_id}/artifacts/"
+        if artifact_id:
+            return f"{base_url}{artifact_id}/"
+        return base_url
+
+    def test_list_artifacts_unauthenticated(self):
+        """Test that unauthenticated requests are rejected."""
+        response = self.client.get(self.get_artifact_url())
+        # DRF returns 403 when no credentials are provided, 401 when invalid credentials are provided
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn(b"Authentication credentials were not provided", response.content)
+
+    @patch("auth_firebase.authentication.firebase_auth.verify_id_token")
+    def test_list_artifacts(self, mock_verify_token):
+        """Test listing artifacts for a workspace."""
+        mock_verify_token.return_value = {"uid": self.test_user_uid}
+        self.authenticate_user()
+
+        response = self.client.get(self.get_artifact_url())
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Response is paginated
+        self.assertIn("results", response.data)
+        artifacts = response.data["results"]
+        self.assertEqual(len(artifacts), 4)  # 4 artifacts in user's workspace
+
+        # Verify artifact data structure
+        artifact_data = artifacts[0]
+        self.assertIn("id", artifact_data)
+        self.assertIn("kind", artifact_data)
+        self.assertIn("environment", artifact_data)
+        self.assertIn("workspace_name", artifact_data)
+
+    @patch("auth_firebase.authentication.firebase_auth.verify_id_token")
+    def test_create_env_var_artifact(self, mock_verify_token):
+        """Test creating an ENV_VAR artifact."""
+        mock_verify_token.return_value = {"uid": self.test_user_uid}
+        self.authenticate_user()
+
+        artifact_data = {
+            "kind": "ENV_VAR",
+            "environment": "STAGING",
+            "key": "NEW_API_KEY",
+            "value": "staging_api_key_value",
+            "notes": "Staging environment API key",
+        }
+
+        response = self.client.post(self.get_artifact_url(), artifact_data)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["kind"], "ENV_VAR")
+        self.assertEqual(response.data["key"], "NEW_API_KEY")
+        self.assertEqual(response.data["environment"], "STAGING")
+
+        # Verify value is masked in response
+        self.assertEqual(response.data["value"], "••••••")
+        self.assertTrue(response.data["value_masked"])
+
+        # Verify artifact was created in database
+        artifact = Artifact.objects.get(id=response.data["id"])
+        self.assertEqual(artifact.value, "staging_api_key_value")  # Real value in DB
