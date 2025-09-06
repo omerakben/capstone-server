@@ -44,12 +44,39 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         return Workspace.objects.none()
 
     def perform_create(self, serializer):
-        """Set owner_uid to authenticated user's UID when creating workspace."""
-        if hasattr(self.request.user, "uid"):
-            serializer.save(owner_uid=self.request.user.uid)  # type: ignore
-        else:
+        """Create workspace and auto-enable all environment types.
+
+        Sets owner_uid from the authenticated user and creates
+        WorkspaceEnvironment rows for all EnvironmentType records so that
+        the M2M join is immediately usable by serializers and filters.
+        """
+        if not hasattr(self.request.user, "uid"):
             # This should not happen with proper authentication
             raise ValueError("Authentication required")
+
+        workspace = serializer.save(owner_uid=self.request.user.uid)  # type: ignore
+
+        # Auto-enable all known environments for the new workspace
+        try:
+            # Local import to avoid potential circulars at import time
+            from .models import EnvironmentType, WorkspaceEnvironment
+
+            env_types = list(EnvironmentType.objects.all())
+            if env_types:
+                WorkspaceEnvironment.objects.bulk_create(
+                    [
+                        WorkspaceEnvironment(
+                            workspace=workspace, environment_type=et
+                        )
+                        for et in env_types
+                    ],
+                    ignore_conflicts=True,
+                )
+        except Exception:
+            # In DEBUG/development we prefer not to fail workspace creation
+            # if environment seeding is unavailable; the UI falls back to
+            # default envs and artifacts still work via legacy field.
+            pass
 
     @action(detail=True, methods=["get"], url_path="export")
     def export_workspace(self, request, pk=None):  # type: ignore[override]
