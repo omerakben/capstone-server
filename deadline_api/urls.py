@@ -11,6 +11,10 @@ The `urlpatterns` list routes URLs to views. For more information please see:
 from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
+from artifacts.views import (
+    ArtifactGlobalSearchView,
+    DocsGlobalListView,
+)
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
@@ -23,6 +27,16 @@ urlpatterns = [
     path(
         "api/v1/auth/", include("auth_firebase.urls")
     ),  # Firebase authentication endpoints
+    path(
+        "api/v1/search/artifacts/",
+        ArtifactGlobalSearchView.as_view(),
+        name="artifact-global-search",
+    ),
+    path(
+        "api/v1/docs/",
+        DocsGlobalListView.as_view(),
+        name="docs-global-list",
+    ),
     # API documentation
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(

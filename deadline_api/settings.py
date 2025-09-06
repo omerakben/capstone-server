@@ -14,6 +14,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 
 from decouple import config
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -41,6 +42,11 @@ ALLOWED_HOSTS = config(
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    # Common alternate dev ports
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3002",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -204,17 +210,30 @@ FIREBASE_CONFIG = {
     "client_x509_cert_url": config("FIREBASE_CLIENT_X509_CERT_URL", default=""),
 }
 
+FIREBASE_CREDENTIALS_FILE = config("FIREBASE_CREDENTIALS_FILE", default="")
+
 # Initialize Firebase Admin SDK
 try:
     import firebase_admin
     from firebase_admin import credentials
 
-    # Only initialize if not already initialized and we have config
-    if len(firebase_admin._apps) == 0 and FIREBASE_CONFIG.get(
-        "project_id"
-    ):  # pylint: disable=protected-access
-        cred = credentials.Certificate(FIREBASE_CONFIG)
-        firebase_admin.initialize_app(cred)
+    if len(firebase_admin._apps) == 0:  # pylint: disable=protected-access
+        cred = None
+        # Prefer explicit credentials file if provided
+        if FIREBASE_CREDENTIALS_FILE and os.path.exists(FIREBASE_CREDENTIALS_FILE):
+            cred = credentials.Certificate(FIREBASE_CREDENTIALS_FILE)
+        elif FIREBASE_CONFIG.get("project_id"):
+            # Fall back to env-based dict configuration
+            cred = credentials.Certificate(FIREBASE_CONFIG)
+
+        if cred is not None:
+            firebase_admin.initialize_app(cred)
+        else:
+            # No credentials provided; in many cases verify_id_token will still work, but warn in DEBUG
+            if DEBUG:
+                print(
+                    "Warning: Firebase credentials not configured. Set FIREBASE_CREDENTIALS_FILE or FIREBASE_* env vars."
+                )
 except ImportError:
     # Firebase Admin SDK not installed – hard fail outside DEBUG
     if not DEBUG:
@@ -233,7 +252,6 @@ if DEBUG:
     INSTALLED_APPS += ["debug_toolbar"]
     MIDDLEWARE += ["debug_toolbar.middleware.DebugToolbarMiddleware"]
     INTERNAL_IPS = ["127.0.0.1", "localhost"]
-    # Mock auth removed: USE_FIREBASE_MOCK deprecated.
     # Optional controlled dev bypass (disabled by default) to avoid full Firebase setup in local/E2E
     # Enable ONLY for local usage: export ALLOW_DEV_FAKE_AUTH=true
     ALLOW_DEV_FAKE_AUTH = config("ALLOW_DEV_FAKE_AUTH", default=False, cast=bool)

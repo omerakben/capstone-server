@@ -1,8 +1,8 @@
 """
 Comprehensive tests for Workspace ViewSet API endpoints.
 
-Tests cover authentication        response = self.client.get('/a        response = self.client.p        response = self.client.get(f'/api/v1/workspaces/{self.user_workspace.id}/')             response = self.client.get(f'/api/v1/workspaces/{empty_workspace.id}/') resp        response = self.client.ge        response = self.client.delete(f'/api/v1/workspaces/{self.user_workspace.id}/')(f'/api/v1/workspaces/{self.other_workspace.id}/')nse = self.client.get(f'/api/v1/workspaces/{self.user_workspace.id}/')st('/api/v1/workspaces/', workspace_data)       response = self.client.post('/api/v1/workspaces/', workspace_data)i/v1/workspaces/')       response = self.client.get('/api/v1/workspaces/')       response = self.client.get('/api/v1/workspaces/') permissions, CRUD operations,
-artifact count functionality, and performance optimizations.
+Tests cover authentication, permissions, CRUD operations, artifact count
+functionality, and performance optimizations.
 """
 
 from unittest.mock import MagicMock, patch

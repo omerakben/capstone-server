@@ -9,6 +9,7 @@ and polymorphic artifact type support.
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.views import APIView
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -282,3 +283,80 @@ class ArtifactViewSet(viewsets.ModelViewSet):
             response_data["not_found_ids"] = sorted([int(x) for x in not_found_ids])
 
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class ArtifactGlobalSearchView(APIView):
+    """
+    Global search across all artifacts owned by the authenticated user.
+
+    Query params:
+      - q: search string
+      - kind: filter by kind (ENV_VAR|PROMPT|DOC_LINK)
+      - environment: filter by environment (DEV|STAGING|PROD)
+      - workspace: optional workspace id to scope results
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):  # type: ignore[override]
+        q = (request.query_params.get("q") or "").strip()  # type: ignore
+        kind = request.query_params.get("kind")  # type: ignore
+        env = request.query_params.get("environment")  # type: ignore
+        workspace_id = request.query_params.get("workspace")  # type: ignore
+
+        if not hasattr(request.user, "uid"):
+            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Filter artifacts by ownership via workspace relation
+        qs = Artifact.objects.select_related("workspace").filter(
+            workspace__owner_uid=request.user.uid  # type: ignore
+        )
+
+        if workspace_id:
+            try:
+                wsid = int(workspace_id)
+                qs = qs.filter(workspace_id=wsid)
+            except ValueError:
+                pass
+
+        if kind:
+            qs = qs.filter(kind=kind)
+        if env:
+            qs = qs.filter(environment=env)
+
+        if q:
+            from django.db.models import Q
+
+            qs = qs.filter(
+                Q(key__icontains=q)
+                | Q(title__icontains=q)
+                | Q(content__icontains=q)
+                | Q(notes__icontains=q)
+                | Q(url__icontains=q)
+            )
+
+        # Order by most recently updated
+        qs = qs.order_by("-updated_at")[:200]
+
+        data = ArtifactSerializer(qs, many=True).data
+        return Response({"results": data, "count": len(data)})
+
+
+class DocsGlobalListView(APIView):
+    """
+    Aggregate DOC_LINK artifacts across all user workspaces.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):  # type: ignore[override]
+        if not hasattr(request.user, "uid"):
+            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        links = (
+            Artifact.objects.select_related("workspace")
+            .filter(workspace__owner_uid=request.user.uid, kind="DOC_LINK")  # type: ignore
+            .order_by("-updated_at")
+        )
+        data = ArtifactSerializer(links, many=True).data
+        return Response({"results": data, "count": len(data)})

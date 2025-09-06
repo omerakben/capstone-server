@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
 
-from .models import Workspace
+from workspaces.models import Workspace
 
 
 class WorkspaceModelTest(TestCase):
@@ -162,3 +162,4 @@ class WorkspaceModelTest(TestCase):
             owner_uid=self.valid_owner_uid,
         )
         self.assertEqual(workspace.description, "Test description with whitespace")
+

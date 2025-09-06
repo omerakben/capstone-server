@@ -104,6 +104,7 @@ dmypy.json
 # Firebase service account keys (security)
 *serviceAccountKey.json
 *firebase-service-account.json
+*firebase-adminsdk*.json
 
 # Local development
 .env.local
