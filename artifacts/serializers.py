@@ -6,6 +6,7 @@ to/from JSON representations for API responses with dynamic field handling.
 """
 
 from rest_framework import serializers
+from workspaces.models import WorkspaceEnvironment
 
 from .models import Artifact
 
@@ -149,27 +150,48 @@ class ArtifactSerializer(serializers.ModelSerializer):
 
         return attrs
 
-    def update(self, instance, validated_data):
-        # Ensure label is synced into metadata on updates
+    def _apply_workspace_env_mapping(self, validated_data, workspace_id: int | None):
+        env_slug = validated_data.get("environment")
+        if env_slug and workspace_id:
+            we = (
+                WorkspaceEnvironment.objects.select_related("environment_type")
+                .filter(workspace_id=workspace_id, environment_type__slug=env_slug)
+                .first()
+            )
+            if we:
+                validated_data["workspace_env"] = we
+
+    def _apply_label_to_metadata_on_write(self, instance, validated_data):
         label = validated_data.pop("label", None)
         if label is not None:
-            meta = instance.metadata or {}
+            meta = (
+                instance.metadata if instance else validated_data.get("metadata")
+            ) or {}
             if not isinstance(meta, dict):
                 meta = {}
             meta["label"] = str(label).strip()
             validated_data["metadata"] = meta
-        return super().update(instance, validated_data)
 
     def create(self, validated_data):
-        # Ensure label is synced into metadata on creates
-        label = validated_data.pop("label", None)
-        if label is not None:
-            meta = validated_data.get("metadata") or {}
-            if not isinstance(meta, dict):
-                meta = {}
-            meta["label"] = str(label).strip()
-            validated_data["metadata"] = meta
+        # Map slug to workspace_env
+        workspace = self.context.get("workspace") or self.initial_data.get("workspace")
+        ws_id = None
+        try:
+            ws_id = workspace.id if hasattr(workspace, "id") else int(workspace)
+        except Exception:
+            ws_id = None
+        self._apply_workspace_env_mapping(validated_data, ws_id)
+        # Label handling
+        self._apply_label_to_metadata_on_write(None, validated_data)
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # Map slug to workspace_env
+        ws_id = instance.workspace.id if instance and instance.workspace_id else None
+        self._apply_workspace_env_mapping(validated_data, ws_id)
+        # Label handling
+        self._apply_label_to_metadata_on_write(instance, validated_data)
+        return super().update(instance, validated_data)
 
     def validate_key(self, value):
         """Validate ENV_VAR key format."""

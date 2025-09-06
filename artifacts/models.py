@@ -52,6 +52,15 @@ class Artifact(models.Model):
     environment = models.CharField(
         max_length=20, choices=ENVIRONMENT_CHOICES, default="DEV"
     )
+    # New: link to WorkspaceEnvironment (many-to-many workspace↔environment)
+    # Kept nullable during migration to backfill safely; later can be non-null
+    workspace_env = models.ForeignKey(
+        "workspaces.WorkspaceEnvironment",
+        on_delete=models.PROTECT,
+        related_name="artifacts",
+        null=True,
+        blank=True,
+    )
 
     # Common fields
     created_at = models.DateTimeField(auto_now_add=True)
@@ -80,6 +89,7 @@ class Artifact(models.Model):
         indexes = [
             models.Index(fields=["workspace", "kind"]),
             models.Index(fields=["workspace", "environment"]),
+            models.Index(fields=["workspace_env"]),
             models.Index(fields=["kind", "-updated_at"]),
             models.Index(fields=["workspace", "kind", "environment"]),
         ]

@@ -26,6 +26,8 @@ class WorkspaceSerializer(serializers.ModelSerializer):
 
     # Artifact counts computed from prefetched artifacts
     artifact_counts = serializers.SerializerMethodField()
+    # Enabled environments for this workspace (M2M via WorkspaceEnvironment)
+    enabled_environments = serializers.SerializerMethodField()
 
     class Meta:
         model = Workspace
@@ -37,6 +39,7 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "artifact_counts",
+            "enabled_environments",
         ]
 
     def validate_name(self, value):
@@ -65,15 +68,49 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "DOC_LINK": len([a for a in artifacts if a.kind == "DOC_LINK"]),
         }
 
-        # Compute counts by environment
-        by_environment = {
-            "DEV": len([a for a in artifacts if a.environment == "DEV"]),
-            "STAGING": len([a for a in artifacts if a.environment == "STAGING"]),
-            "PROD": len([a for a in artifacts if a.environment == "PROD"]),
-        }
+        # Compute counts by environment (prefer workspace_env join when available)
+        def env_slug(a):
+            try:
+                we = getattr(a, "workspace_env", None)
+                if we and getattr(we, "environment_type", None):
+                    return getattr(we.environment_type, "slug", None) or a.environment
+            except Exception:
+                pass
+            return a.environment
+
+        by_environment = {"DEV": 0, "STAGING": 0, "PROD": 0}
+        for a in artifacts:
+            slug = env_slug(a) or ""
+            if slug in by_environment:
+                by_environment[slug] += 1
 
         return {
             "total": total,
             "by_type": by_type,
             "by_environment": by_environment,
         }
+
+    def get_enabled_environments(self, obj):
+        """Return enabled environments for this workspace as a list of dicts."""
+        # Avoid import cycle by local import
+        try:
+            wes = getattr(obj, "workspace_environments", None)
+            if wes is None:
+                return []
+            items = []
+            for we in wes.select_related("environment_type").all():
+                et = we.environment_type
+                if not et:
+                    continue
+                items.append(
+                    {
+                        "slug": et.slug,
+                        "name": et.name,
+                        "display_order": et.display_order,
+                    }
+                )
+            # Sort by display_order then name for stability
+            items.sort(key=lambda x: (x.get("display_order", 0), x.get("name", "")))
+            return items
+        except Exception:
+            return []

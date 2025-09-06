@@ -6,15 +6,14 @@ with workspace-based nested routing, Firebase UID-based ownership,
 and polymorphic artifact type support.
 """
 
+from auth_firebase.permissions import IsOwner
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.views import APIView
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-
-from auth_firebase.permissions import IsOwner
+from rest_framework.views import APIView
 from workspaces.models import Workspace
 
 from .models import Artifact
@@ -60,7 +59,9 @@ class ArtifactViewSet(viewsets.ModelViewSet):
                     id=workspace_id,
                 )
                 return Artifact.objects.filter(workspace=workspace).select_related(
-                    "workspace"
+                    "workspace",
+                    "workspace_env",
+                    "workspace_env__environment_type",
                 )
             except (Workspace.DoesNotExist, AttributeError):
                 return Artifact.objects.none()
@@ -89,6 +90,13 @@ class ArtifactViewSet(viewsets.ModelViewSet):
         else:
             raise ValueError("Workspace not found or access denied")
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        workspace = self.get_workspace()
+        if workspace:
+            ctx["workspace"] = workspace
+        return ctx
+
     def get_queryset_filters(self):
         """Apply query parameter filters manually."""
         queryset = self.get_queryset()
@@ -98,10 +106,17 @@ class ArtifactViewSet(viewsets.ModelViewSet):
         if kind:
             queryset = queryset.filter(kind=kind)
 
-        # Filter by environment
+        # Filter by environment: support both legacy field and new join
         environment = self.request.query_params.get("environment")  # type: ignore
         if environment:
-            queryset = queryset.filter(environment=environment)
+            try:
+                # Prefer join against workspace_env -> environment_type.slug
+                queryset = queryset.filter(
+                    workspace_env__environment_type__slug=environment
+                )
+            except Exception:
+                # Fallback to legacy char field
+                queryset = queryset.filter(environment=environment)
 
         return queryset
 
@@ -133,10 +148,8 @@ class ArtifactViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def duplicate_to_environment(self, request, *args, **kwargs):
         """
-        Duplicate artifact to a different environment.
-
-        Creates a copy of the artifact with the specified target environment
-        while preserving all other data.
+        Duplicate artifact to a different environment by creating a new record
+        with the same fields but a different environment slug.
         """
         artifact = self.get_object()
         target_environment = request.data.get("environment")
@@ -153,7 +166,6 @@ class ArtifactViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Create duplicate data
         duplicate_data = {
             "workspace": artifact.workspace.id,
             "kind": artifact.kind,
@@ -162,32 +174,17 @@ class ArtifactViewSet(viewsets.ModelViewSet):
             "metadata": artifact.metadata,
         }
 
-        # Add type-specific fields
         if artifact.kind == "ENV_VAR":
-            duplicate_data.update(
-                {
-                    "key": artifact.key,
-                    "value": artifact.value,
-                }
-            )
+            duplicate_data.update({"key": artifact.key, "value": artifact.value})
         elif artifact.kind == "PROMPT":
             duplicate_data.update(
-                {
-                    "title": artifact.title,
-                    "content": artifact.content,
-                }
+                {"title": artifact.title, "content": artifact.content}
             )
         elif artifact.kind == "DOC_LINK":
-            duplicate_data.update(
-                {
-                    "title": artifact.title,
-                    "url": artifact.url,
-                }
-            )
+            duplicate_data.update({"title": artifact.title, "url": artifact.url})
 
         serializer = self.get_serializer(data=duplicate_data)
         if serializer.is_valid():
-            # Ensure workspace is set (serializer field is read-only)
             serializer.save(workspace=artifact.workspace)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -305,10 +302,14 @@ class ArtifactGlobalSearchView(APIView):
         workspace_id = request.query_params.get("workspace")  # type: ignore
 
         if not hasattr(request.user, "uid"):
-            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED
+            )
 
         # Filter artifacts by ownership via workspace relation
-        qs = Artifact.objects.select_related("workspace").filter(
+        qs = Artifact.objects.select_related(
+            "workspace", "workspace_env", "workspace_env__environment_type"
+        ).filter(
             workspace__owner_uid=request.user.uid  # type: ignore
         )
 
@@ -322,7 +323,10 @@ class ArtifactGlobalSearchView(APIView):
         if kind:
             qs = qs.filter(kind=kind)
         if env:
-            qs = qs.filter(environment=env)
+            try:
+                qs = qs.filter(workspace_env__environment_type__slug=env)
+            except Exception:
+                qs = qs.filter(environment=env)
 
         if q:
             from django.db.models import Q
@@ -351,7 +355,9 @@ class DocsGlobalListView(APIView):
 
     def get(self, request):  # type: ignore[override]
         if not hasattr(request.user, "uid"):
-            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED
+            )
 
         links = (
             Artifact.objects.select_related("workspace")

@@ -5,14 +5,13 @@ This module provides RESTful API endpoints for workspace CRUD operations
 with Firebase UID-based ownership and proper permission checks.
 """
 
+from artifacts.serializers import ArtifactSerializer
+from auth_firebase.permissions import IsOwner
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
-from auth_firebase.permissions import IsOwner
-
-from artifacts.serializers import ArtifactSerializer
 from .models import Workspace
 from .serializers import WorkspaceSerializer
 
@@ -37,8 +36,11 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         """
         if hasattr(self.request.user, "uid"):
             return Workspace.objects.filter(
-                owner_uid=self.request.user.uid  # type: ignore
-            ).prefetch_related("artifacts")
+                owner_uid=self.request.user.uid
+            ).prefetch_related(  # type: ignore
+                "artifacts",
+                "workspace_environments__environment_type",
+            )
         return Workspace.objects.none()
 
     def perform_create(self, serializer):
@@ -84,7 +86,9 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         artifacts_in = data.get("artifacts") or []
 
         if not isinstance(ws_in, dict) or not ws_in.get("name"):
-            return Response({"error": "Invalid workspace data"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Invalid workspace data"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Create workspace for current user; adjust name if exists
         base_name = str(ws_in.get("name")).strip()
@@ -93,7 +97,10 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         # Enforce owner
         owner_uid = getattr(request.user, "uid", None)
         if not owner_uid:
-            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
         name = base_name
         suffix = 1
@@ -119,7 +126,10 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
             # else: silently skip invalid artifacts for MVP import
 
         out = WorkspaceSerializer(ws).data
-        return Response({"workspace": out, "imported_count": len(created)}, status=status.HTTP_201_CREATED)
+        return Response(
+            {"workspace": out, "imported_count": len(created)},
+            status=status.HTTP_201_CREATED,
+        )
 
     def _now_iso(self):
         from datetime import datetime, timezone

@@ -95,3 +95,50 @@ class Workspace(models.Model):
             if len(str(self.owner_uid)) > 8
             else str(self.owner_uid)
         )
+
+
+class EnvironmentType(models.Model):
+    """
+    Master list of environment types (e.g., DEV, STAGING, PROD).
+
+    Seeded rows define the canonical set of environments a workspace can enable.
+    """
+
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=50, unique=True)
+    slug = models.SlugField(max_length=20, unique=True)
+    display_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["display_order", "name"]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"{self.name} ({self.slug})"
+
+
+class WorkspaceEnvironment(models.Model):
+    """
+    Join entity to represent which environments are enabled for a workspace.
+
+    This enables a many-to-many relationship between Workspace and EnvironmentType.
+    """
+
+    id = models.AutoField(primary_key=True)
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="workspace_environments"
+    )
+    environment_type = models.ForeignKey(
+        EnvironmentType,
+        on_delete=models.CASCADE,
+        related_name="workspace_environments",
+    )
+
+    class Meta:
+        unique_together = ("workspace", "environment_type")
+        indexes = [
+            models.Index(fields=["workspace", "environment_type"]),
+        ]
+        ordering = ["workspace_id", "environment_type_id"]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"{self.workspace_id}-{self.environment_type_id}"
