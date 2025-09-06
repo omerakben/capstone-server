@@ -11,10 +11,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 from decouple import config
-import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -252,6 +252,4 @@ if DEBUG:
     INSTALLED_APPS += ["debug_toolbar"]
     MIDDLEWARE += ["debug_toolbar.middleware.DebugToolbarMiddleware"]
     INTERNAL_IPS = ["127.0.0.1", "localhost"]
-    # Optional controlled dev bypass (disabled by default) to avoid full Firebase setup in local/E2E
-    # Enable ONLY for local usage: export ALLOW_DEV_FAKE_AUTH=true
-    ALLOW_DEV_FAKE_AUTH = config("ALLOW_DEV_FAKE_AUTH", default=False, cast=bool)
+    # Dev bypass removed – real Firebase auth only

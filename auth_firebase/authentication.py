@@ -9,7 +9,6 @@ mock authentication for local development.
 import logging
 from typing import Optional, Tuple
 
-from django.conf import settings
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -133,17 +132,7 @@ class FirebaseAuthentication(BaseAuthentication):
         Raises:
             AuthenticationFailed: If token validation fails
         """
-        # Development fake auth bypass (only if explicitly allowed and DEBUG)
-        if (
-            getattr(settings, "DEBUG", False)
-            and getattr(settings, "ALLOW_DEV_FAKE_AUTH", False)
-            and raw_token.startswith("dev-test-")
-        ):
-            uid = raw_token.removeprefix("dev-test-") or "dev_fallback_uid"
-            logger.info("⚠️ Using dev fake auth UID=%s (DO NOT ENABLE IN PROD)", uid)
-            return (FirebaseUser(uid=uid), raw_token)
-
-        # Otherwise enforce real Firebase authentication
+        # Enforce real Firebase authentication only
         return self.get_firebase_user(raw_token)
 
     # Removed mock authentication helpers (should_use_mock_auth, get_mock_user)
