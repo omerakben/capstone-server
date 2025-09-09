@@ -92,14 +92,25 @@ class WorkspaceSerializer(serializers.ModelSerializer):
 
     def get_enabled_environments(self, obj):
         """Return enabled environments for this workspace as a list of dicts."""
-        # Avoid import cycle by local import
+        # Allow views to opt-out to avoid extra queries in list endpoints
+        if not self.context.get("include_enabled_environments", True):
+            return []
         try:
-            wes = getattr(obj, "workspace_environments", None)
-            if wes is None:
+            wes_mgr = getattr(obj, "workspace_environments", None)
+            if wes_mgr is None:
                 return []
+
+            # If prefetched via get_queryset(), use the cached objects to avoid
+            # additional queries. Otherwise, fetch with select_related.
+            prefetched = getattr(obj, "_prefetched_objects_cache", {}) or {}
+            if "workspace_environments" in prefetched:
+                wes = prefetched["workspace_environments"]
+            else:
+                wes = wes_mgr.select_related("environment_type").all()
+
             items = []
-            for we in wes.select_related("environment_type").all():
-                et = we.environment_type
+            for we in wes:
+                et = getattr(we, "environment_type", None)
                 if not et:
                     continue
                 items.append(

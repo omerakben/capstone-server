@@ -39,9 +39,19 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
                 owner_uid=self.request.user.uid
             ).prefetch_related(  # type: ignore
                 "artifacts",
-                "workspace_environments__environment_type",
             )
         return Workspace.objects.none()
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        # Avoid extra queries in list view by skipping enabled_environments
+        # computation; detail views can compute it as needed.
+        try:
+            if getattr(self, "action", None) == "list":
+                ctx["include_enabled_environments"] = False
+        except Exception:
+            pass
+        return ctx
 
     def perform_create(self, serializer):
         """Create workspace and auto-enable all environment types.

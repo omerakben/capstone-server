@@ -96,6 +96,24 @@ class Workspace(models.Model):
             else str(self.owner_uid)
         )
 
+    def delete(self, *args, **kwargs):
+        """
+        Ensure full cleanup on workspace deletion.
+
+        Artifacts reference WorkspaceEnvironment with PROTECT to prevent
+        accidental environment removal when artifacts exist. When deleting a
+        workspace, we want all related data removed. Deleting artifacts first
+        avoids PROTECT conflicts, then we proceed with the normal cascade which
+        removes WorkspaceEnvironment rows and the workspace itself.
+        """
+        # Delete related artifacts up-front to avoid PROTECT via workspace_env
+        try:
+            self.artifacts.all().delete()
+        except Exception:  # best-effort cleanup; continue with deletion
+            pass
+        # Proceed with default deletion (will cascade workspace_environments)
+        return super().delete(*args, **kwargs)
+
 
 class EnvironmentType(models.Model):
     """
