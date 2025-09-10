@@ -281,6 +281,34 @@ class ArtifactViewSet(viewsets.ModelViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"], url_path="reveal_value")
+    def reveal_value(self, request, *args, **kwargs):
+        """
+        Reveal the unmasked value for an ENV_VAR artifact.
+
+        Security:
+        - Uses standard IsAuthenticated + IsOwner checks from the ViewSet.
+        - Only permitted for artifacts of kind ENV_VAR.
+        - Returns minimal fields necessary for display/copy.
+        """
+        artifact = self.get_object()
+        if artifact.kind != "ENV_VAR":
+            return Response(
+                {"error": "Not an environment variable"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": artifact.id,
+                "workspace": artifact.workspace_id,
+                "key": artifact.key,
+                "value": artifact.value,
+                "environment": artifact.environment,
+                "updated_at": artifact.updated_at,
+            }
+        )
+
 
 class ArtifactGlobalSearchView(APIView):
     """
