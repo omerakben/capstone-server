@@ -172,3 +172,109 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         from datetime import datetime, timezone
 
         return datetime.now(timezone.utc).isoformat()
+
+    @action(detail=True, methods=["patch"], url_path="enabled_environments")
+    def enabled_environments(self, request, pk=None):  # type: ignore[override]
+        """
+        Toggle enabled environments (WorkspaceEnvironment joins) for a workspace.
+
+        Payload: { "enabled": ["DEV", "STAGING", "PROD"] }
+
+        Rules:
+        - Create joins for any newly enabled slugs.
+        - Before removing a join, ensure there are no artifacts in that env.
+          If artifacts exist, return 400 with a helpful message.
+        """
+        workspace = self.get_object()
+
+        enabled_slugs = request.data.get("enabled", [])  # type: ignore
+        if not isinstance(enabled_slugs, list) or not all(
+            isinstance(x, str) for x in enabled_slugs
+        ):
+            return Response(
+                {"error": "enabled must be an array of strings"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Normalize to uppercase known slugs
+        target = {s.upper() for s in enabled_slugs if s}
+        allowed = {"DEV", "STAGING", "PROD"}
+        if not target.issubset(allowed):
+            return Response(
+                {"error": f"Unknown slugs provided. Allowed: {sorted(allowed)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .models import EnvironmentType, WorkspaceEnvironment
+        from artifacts.models import Artifact
+
+        # Current joins
+        current_wes = (
+            WorkspaceEnvironment.objects.select_related("environment_type")
+            .filter(workspace=workspace)
+            .all()
+        )
+        current = {we.environment_type.slug for we in current_wes if we.environment_type}
+
+        to_create = target - current
+        to_remove = current - target
+
+        # Block removal if artifacts exist in that environment
+        blocking = []
+        for slug in sorted(to_remove):
+            # Prefer join-based check, fallback to legacy char field
+            count = (
+                Artifact.objects.filter(
+                    workspace=workspace,
+                    workspace_env__environment_type__slug=slug,
+                ).count()
+            )
+            if count == 0:
+                count = (
+                    Artifact.objects.filter(
+                        workspace=workspace,
+                        environment=slug,
+                    ).count()
+                )
+            if count > 0:
+                blocking.append({"slug": slug, "artifact_count": count})
+
+        if blocking:
+            return Response(
+                {
+                    "error": "Cannot disable environments that have artifacts",
+                    "blocking": blocking,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create missing joins
+        if to_create:
+            env_types = {
+                et.slug: et
+                for et in EnvironmentType.objects.filter(slug__in=list(to_create))
+            }
+            WorkspaceEnvironment.objects.bulk_create(
+                [
+                    WorkspaceEnvironment(
+                        workspace=workspace, environment_type=env_types[slug]
+                    )
+                    for slug in to_create
+                    if slug in env_types
+                ],
+                ignore_conflicts=True,
+            )
+
+        # Remove disabled joins
+        if to_remove:
+            WorkspaceEnvironment.objects.filter(
+                workspace=workspace, environment_type__slug__in=list(to_remove)
+            ).delete()
+
+        # Return updated enabled list
+        # Reuse serializer helper by fetching fresh object
+        from .serializers import WorkspaceSerializer
+
+        ws = type(workspace).objects.get(pk=workspace.pk)
+        data = WorkspaceSerializer(ws).data
+        return Response({"enabled_environments": data.get("enabled_environments", [])})
