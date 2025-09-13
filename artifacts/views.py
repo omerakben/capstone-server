@@ -52,7 +52,6 @@ class ArtifactViewSet(viewsets.ModelViewSet):
                     field = serializer.fields["tags"]
                     target = getattr(field, "child_relation", field)
                     target.queryset = Tag.objects.filter(workspace=ws)
-                    # (debug print removed)
         except Exception:
             # Non-fatal safeguard; default behavior still applies
             pass

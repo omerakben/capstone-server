@@ -214,40 +214,48 @@ FIREBASE_CONFIG = {
 
 FIREBASE_CREDENTIALS_FILE = config("FIREBASE_CREDENTIALS_FILE", default="")
 
-# Initialize Firebase Admin SDK
-try:
+"""Firebase Admin SDK Initialization.
+
+Attempts credential initialization using (in order):
+1. Explicit service account JSON file path via FIREBASE_CREDENTIALS_FILE
+2. Individual FIREBASE_* environment variables forming a credentials dict
+
+All warnings are routed through Python's logging module (no print statements) so
+they can be managed by the deployment logging configuration.
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+try:  # Initialize Firebase Admin SDK
     import firebase_admin
     from firebase_admin import credentials
 
     if len(firebase_admin._apps) == 0:  # pylint: disable=protected-access
         cred = None
-        # Prefer explicit credentials file if provided
         if FIREBASE_CREDENTIALS_FILE and os.path.exists(FIREBASE_CREDENTIALS_FILE):
             cred = credentials.Certificate(FIREBASE_CREDENTIALS_FILE)
         elif FIREBASE_CONFIG.get("project_id"):
-            # Fall back to env-based dict configuration
             cred = credentials.Certificate(FIREBASE_CONFIG)
 
         if cred is not None:
             firebase_admin.initialize_app(cred)
         else:
-            # No credentials provided; in many cases verify_id_token will still work, but warn in DEBUG
             if DEBUG:
-                print(
-                    "Warning: Firebase credentials not configured. Set FIREBASE_CREDENTIALS_FILE or FIREBASE_* env vars."
+                logger.warning(
+                    "Firebase credentials not configured. Set FIREBASE_CREDENTIALS_FILE or FIREBASE_* env vars."
                 )
 except ImportError:
-    # Firebase Admin SDK not installed – hard fail outside DEBUG
     if not DEBUG:
         raise
-    else:
-        print("Warning: firebase_admin not installed; authentication will fail.")
+    logger.warning(
+        "firebase_admin not installed; authentication will fail outside development."
+    )
 except (ValueError, KeyError) as e:
-    # Configuration error – fail fast if not DEBUG
     if not DEBUG:
         raise
-    else:
-        print(f"Warning: Firebase initialization failed (development mode): {e}")
+    logger.warning("Firebase initialization failed (development mode): %s", e)
 
 # Local development settings
 if DEBUG:

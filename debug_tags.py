@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 import os
 import sys
+from pathlib import Path
 
 import django
 
-# Configure Django settings
+# Configure Django settings (portable, repo‑relative)
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "deadline_api.settings")
-sys.path.append("/Users/ozzy-mac/Projects/DEADLINE/capstone-server")
 django.setup()
 
 from artifacts.models import Artifact, ArtifactTag, Tag

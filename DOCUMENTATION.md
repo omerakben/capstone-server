@@ -20,7 +20,7 @@ The core philosophy of DEADLINE is to centralize and streamline developer workfl
 
 ### 1.2. Technology Stack
 
-- **Backend**: Django 5.2 & Django REST Framework 3.15+
+- **Backend**: Django 5.1.x & Django REST Framework 3.16+
 - **Authentication**: Firebase Admin SDK (JWT validation)
 - **Database**: SQLite (for local development), PostgreSQL (for production)
 - **API Documentation**: `drf-spectacular` for Swagger UI generation.
@@ -198,7 +198,7 @@ The base URL for the API is `/api/v1/`.
 
 ### 3.3. Global Search and Views
 
-#### GET `/api/v1/artifacts/search/`
+#### GET `/api/v1/search/artifacts/`
 
 - **Description**: Globally search across all artifacts owned by the user.
 - **Query Parameters**:
@@ -206,15 +206,12 @@ The base URL for the API is `/api/v1/`.
   - `kind`, `environment`, `workspace`: Optional filters.
 - **Successful Response (`200 OK`)**: A list of matching artifact objects.
 
-#### GET `/api/v1/artifacts/docs/`
+#### GET `/api/v1/docs/`
 
 - **Description**: Get a list of all `DOC_LINK` artifacts across all workspaces for the user.
 - **Successful Response (`200 OK`)**: A list of `DOC_LINK` artifact objects.
 
-#### GET `/api/v1/artifacts/prompts/`
-
-- **Description**: Get a list of all `PROMPT` artifacts across all workspaces for the user.
-- **Successful Response (`200 OK`)**: A list of `PROMPT` artifact objects.
+> Note: There is no dedicated global prompts endpoint; prompts are included in search results.
 
 ## 4. Setup and Installation
 
@@ -241,7 +238,7 @@ The base URL for the API is `/api/v1/`.
 4. **Configure environment variables**:
     - Copy `.env.example` to `.env`.
     - Set the `SECRET_KEY` in your `.env` file.
-    - For Firebase integration, you will need to obtain a service account key file (`.json`) from your Firebase project settings and set the `FIREBASE_SERVICE_ACCOUNT_KEY_PATH` in your `.env` file to its path.
+    - For Firebase integration, obtain a service account JSON and set `FIREBASE_CREDENTIALS_FILE` to its path (or provide the `FIREBASE_*` variables: project id, private key id, private key, client email, client id, etc.).
 5. **Run database migrations**:
 
     ```bash
