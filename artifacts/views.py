@@ -9,10 +9,10 @@ and polymorphic artifact type support.
 from auth_firebase.permissions import IsOwner
 from django.db import IntegrityError
 from django.db.models import Count
-from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -38,7 +38,7 @@ class ArtifactViewSet(viewsets.ModelViewSet):
     serializer_class = ArtifactSerializer
     permission_classes = [IsAuthenticated, IsOwner]
     filter_backends = [SearchFilter, OrderingFilter]
-    search_fields = ["key", "title", "content", "notes", "url"]
+    search_fields = ["key", "title", "content", "notes", "url", "tags__name"]
     ordering_fields = ["created_at", "updated_at", "kind", "environment"]
     ordering = ["-updated_at"]
 
@@ -211,6 +211,33 @@ class ArtifactViewSet(viewsets.ModelViewSet):
             return Response(
                 {"error": "Invalid environment. Must be DEV, STAGING, or PROD"},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if artifact already exists in target environment
+        existing_check = {}
+        if artifact.kind == "ENV_VAR":
+            existing_check = {
+                "workspace": artifact.workspace,
+                "kind": "ENV_VAR",
+                "key": artifact.key,
+                "environment": target_environment,
+            }
+        elif artifact.kind in ["PROMPT", "DOC_LINK"]:
+            existing_check = {
+                "workspace": artifact.workspace,
+                "kind": artifact.kind,
+                "title": artifact.title,
+                "environment": target_environment,
+            }
+
+        if existing_check and Artifact.objects.filter(**existing_check).exists():
+            field_name = "key" if artifact.kind == "ENV_VAR" else "title"
+            field_value = artifact.key if artifact.kind == "ENV_VAR" else artifact.title
+            return Response(
+                {
+                    "error": f"An artifact with {field_name} '{field_value}' already exists in {target_environment} environment"
+                },
+                status=status.HTTP_409_CONFLICT,
             )
 
         duplicate_data = {
@@ -433,6 +460,7 @@ class ArtifactGlobalSearchView(APIView):
                 | Q(content__icontains=q)
                 | Q(notes__icontains=q)
                 | Q(url__icontains=q)
+                | Q(tags__name__icontains=q)
             )
 
         # Order by most recently updated
