@@ -1,16 +1,17 @@
 from unittest.mock import patch
 
+from artifacts.models import (
+    Artifact,
+    ArtifactTag,
+    Tag,
+    validate_env_var_key,
+    validate_prompt_content_length,
+)
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
-
-from artifacts.models import (
-    Artifact,
-    validate_env_var_key,
-    validate_prompt_content_length,
-)
 from workspaces.models import Workspace
 
 
@@ -427,6 +428,78 @@ class ArtifactModelTest(TestCase):
         artifacts = Artifact.objects.all()
         self.assertEqual(artifacts[0], second_artifact)  # Most recent first
         self.assertEqual(artifacts[1], first_artifact)  # Older second
+
+
+class TagModelTest(TestCase):
+    """Tests for Tag model and Artifact ↔ Tag many-to-many through ArtifactTag."""
+
+    def setUp(self):
+        self.workspace = Workspace.objects.create(
+            name="Tag Workspace",
+            description="Workspace for tag tests",
+            owner_uid="tag_user_1",
+        )
+        self.artifact = Artifact.objects.create(
+            workspace=self.workspace,
+            kind="ENV_VAR",
+            environment="DEV",
+            key="TAG_KEY",
+            value="value",
+        )
+
+    def test_tag_creation(self):
+        tag = Tag.objects.create(workspace=self.workspace, name="backend")
+        self.assertEqual(tag.name, "backend")
+        self.assertEqual(tag.workspace, self.workspace)
+
+    def test_tag_uniqueness_per_workspace(self):
+        from django.db import transaction
+        Tag.objects.create(workspace=self.workspace, name="shared")
+        # Wrap duplicate creation in an atomic block to avoid breaking the
+        # outer TestCase transaction on SQLite
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Tag.objects.create(workspace=self.workspace, name="shared")
+        # Same name in different workspace allowed
+        ws2 = Workspace.objects.create(
+            name="Second WS", description="Second", owner_uid="tag_user_2"
+        )
+        try:
+            Tag.objects.create(workspace=ws2, name="shared")
+        except IntegrityError:
+            self.fail("Tag uniqueness wrongly enforced across workspaces")
+
+    def test_assign_tag_to_artifact(self):
+        tag = Tag.objects.create(workspace=self.workspace, name="api")
+        self.artifact.tags.add(tag)
+        self.artifact.refresh_from_db()
+        self.assertIn(tag, self.artifact.tags.all())
+
+    def test_artifact_tag_uniqueness(self):
+        tag = Tag.objects.create(workspace=self.workspace, name="ops")
+        ArtifactTag.objects.create(artifact=self.artifact, tag=tag)
+        with self.assertRaises(IntegrityError):
+            ArtifactTag.objects.create(artifact=self.artifact, tag=tag)
+
+    def test_deleting_artifact_cascades_artifacttag_only(self):
+        tag = Tag.objects.create(workspace=self.workspace, name="infra")
+        self.artifact.tags.add(tag)
+        self.assertEqual(ArtifactTag.objects.filter(tag=tag).count(), 1)
+        self.artifact.delete()
+        # Through row removed
+        self.assertEqual(ArtifactTag.objects.filter(tag=tag).count(), 0)
+        # Tag remains
+        self.assertTrue(Tag.objects.filter(id=tag.id).exists())
+
+    def test_deleting_tag_cascades_artifacttag_only(self):
+        tag = Tag.objects.create(workspace=self.workspace, name="cli")
+        self.artifact.tags.add(tag)
+        self.assertEqual(ArtifactTag.objects.filter(artifact=self.artifact).count(), 1)
+        tag.delete()
+        # Through row removed
+        self.assertEqual(ArtifactTag.objects.filter(artifact=self.artifact).count(), 0)
+        # Artifact remains
+        self.assertTrue(Artifact.objects.filter(id=self.artifact.id).exists())
 
 
 class ArtifactViewSetTest(APITestCase):

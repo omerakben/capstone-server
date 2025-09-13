@@ -7,6 +7,9 @@ and polymorphic artifact type support.
 """
 
 from auth_firebase.permissions import IsOwner
+from django.db import IntegrityError
+from django.db.models import Count
+from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -38,6 +41,22 @@ class ArtifactViewSet(viewsets.ModelViewSet):
     search_fields = ["key", "title", "content", "notes", "url"]
     ordering_fields = ["created_at", "updated_at", "kind", "environment"]
     ordering = ["-updated_at"]
+
+    def get_serializer(self, *args, **kwargs):
+        """Ensure tag field queryset is workspace-scoped for write operations."""
+        serializer = super().get_serializer(*args, **kwargs)
+        try:
+            ws = self.get_workspace()
+            if ws and hasattr(serializer, "fields"):
+                if "tags" in serializer.fields:
+                    field = serializer.fields["tags"]
+                    target = getattr(field, "child_relation", field)
+                    target.queryset = Tag.objects.filter(workspace=ws)
+                    # (debug print removed)
+        except Exception:
+            # Non-fatal safeguard; default behavior still applies
+            pass
+        return serializer
 
     def get_queryset(self):
         """
@@ -145,6 +164,34 @@ class ArtifactViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["get"], url_path="reveal_value")
+    def reveal_value(self, request, *args, **kwargs):
+        """
+        Reveal the unmasked value for an ENV_VAR artifact.
+
+        Security:
+        - Uses standard IsAuthenticated + IsOwner checks from the ViewSet.
+        - Only permitted for artifacts of kind ENV_VAR.
+        - Returns minimal fields necessary for display/copy.
+        """
+        artifact = self.get_object()
+        if artifact.kind != "ENV_VAR":
+            return Response(
+                {"error": "Not an environment variable"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": artifact.id,
+                "workspace": artifact.workspace_id,
+                "key": artifact.key,
+                "value": artifact.value,
+                "environment": artifact.environment,
+                "updated_at": artifact.updated_at,
+            }
+        )
+
     @action(detail=True, methods=["post"])
     def duplicate_to_environment(self, request, *args, **kwargs):
         """
@@ -249,6 +296,8 @@ class TagViewSet(viewsets.ModelViewSet):
 
     serializer_class = TagSerializer
     permission_classes = [IsAuthenticated, IsOwner]
+    # Return a simple array for tags (client expects a list, not paginated)
+    pagination_class = None
     queryset = Tag.objects.none()
 
     def get_workspace(self):
@@ -266,45 +315,59 @@ class TagViewSet(viewsets.ModelViewSet):
         ws = self.get_workspace()
         if not ws:
             return Tag.objects.none()
-        return Tag.objects.filter(workspace=ws).order_by("name")
+        return (
+            Tag.objects.filter(workspace=ws)
+            .annotate(usage_count=Count("artifact_tags"))
+            .order_by("name")
+        )
+
+    def get_serializer_context(self):
+        """Provide workspace to serializer for validation (e.g., unique name)."""
+        ctx = super().get_serializer_context()
+        ws = self.get_workspace()
+        if ws:
+            ctx["workspace"] = ws
+        return ctx
 
     def perform_create(self, serializer):
         ws = self.get_workspace()
         if not ws:
             raise ValueError("Workspace not found or access denied")
-        serializer.save(workspace=ws)
+        try:
+            serializer.save(workspace=ws)
+        except IntegrityError:
+            # Race condition fallback: ensure clean 400 instead of 500
+            raise ValidationError(
+                {"name": "A tag with this name already exists in this workspace"}
+            )
 
     @action(detail=False, methods=["delete"])
     def bulk_delete(self, request, *args, **kwargs):
         """
-        Delete multiple artifacts by IDs.
+        Delete multiple tags by IDs within the current workspace.
 
-        Accepts an array of artifact IDs and deletes them if they
-        belong to the workspace and user has permission.
+        Body: { "ids": number[] }
         """
-        artifact_ids = request.data.get("ids", [])
+        tag_ids = request.data.get("ids", [])
 
-        if not isinstance(artifact_ids, list) or not artifact_ids:
+        if not isinstance(tag_ids, list) or not tag_ids:
             return Response(
-                {"error": "Expected an array of artifact IDs"},
+                {"error": "Expected an array of tag IDs"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Filter artifacts that exist and belong to this workspace
         queryset = self.get_queryset()
-        artifacts_to_delete = queryset.filter(id__in=artifact_ids)
+        tags_to_delete = queryset.filter(id__in=tag_ids)
 
-        deleted_count = artifacts_to_delete.count()
-        not_found_ids = set(artifact_ids) - set(
-            artifacts_to_delete.values_list("id", flat=True)
-        )
+        deleted_count = tags_to_delete.count()
+        not_found_ids = set(tag_ids) - set(tags_to_delete.values_list("id", flat=True))
 
-        # Perform deletion
-        artifacts_to_delete.delete()
+        # Perform deletion (will cascade ArtifactTag rows only)
+        tags_to_delete.delete()
 
         response_data: dict = {
             "deleted_count": deleted_count,
-            "requested_count": len(artifact_ids),
+            "requested_count": len(tag_ids),
         }
 
         if not_found_ids:
@@ -312,33 +375,7 @@ class TagViewSet(viewsets.ModelViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["get"], url_path="reveal_value")
-    def reveal_value(self, request, *args, **kwargs):
-        """
-        Reveal the unmasked value for an ENV_VAR artifact.
-
-        Security:
-        - Uses standard IsAuthenticated + IsOwner checks from the ViewSet.
-        - Only permitted for artifacts of kind ENV_VAR.
-        - Returns minimal fields necessary for display/copy.
-        """
-        artifact = self.get_object()
-        if artifact.kind != "ENV_VAR":
-            return Response(
-                {"error": "Not an environment variable"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        return Response(
-            {
-                "id": artifact.id,
-                "workspace": artifact.workspace_id,
-                "key": artifact.key,
-                "value": artifact.value,
-                "environment": artifact.environment,
-                "updated_at": artifact.updated_at,
-            }
-        )
+    # Note: reveal_value belongs on ArtifactViewSet (moved below).
 
 
 class ArtifactGlobalSearchView(APIView):

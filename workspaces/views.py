@@ -75,9 +75,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
             if env_types:
                 WorkspaceEnvironment.objects.bulk_create(
                     [
-                        WorkspaceEnvironment(
-                            workspace=workspace, environment_type=et
-                        )
+                        WorkspaceEnvironment(workspace=workspace, environment_type=et)
                         for et in env_types
                     ],
                     ignore_conflicts=True,
@@ -205,8 +203,9 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from .models import EnvironmentType, WorkspaceEnvironment
         from artifacts.models import Artifact
+
+        from .models import EnvironmentType, WorkspaceEnvironment
 
         # Current joins
         current_wes = (
@@ -214,7 +213,9 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
             .filter(workspace=workspace)
             .all()
         )
-        current = {we.environment_type.slug for we in current_wes if we.environment_type}
+        current = {
+            we.environment_type.slug for we in current_wes if we.environment_type
+        }
 
         to_create = target - current
         to_remove = current - target
@@ -223,19 +224,15 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         blocking = []
         for slug in sorted(to_remove):
             # Prefer join-based check, fallback to legacy char field
-            count = (
-                Artifact.objects.filter(
-                    workspace=workspace,
-                    workspace_env__environment_type__slug=slug,
-                ).count()
-            )
+            count = Artifact.objects.filter(
+                workspace=workspace,
+                workspace_env__environment_type__slug=slug,
+            ).count()
             if count == 0:
-                count = (
-                    Artifact.objects.filter(
-                        workspace=workspace,
-                        environment=slug,
-                    ).count()
-                )
+                count = Artifact.objects.filter(
+                    workspace=workspace,
+                    environment=slug,
+                ).count()
             if count > 0:
                 blocking.append({"slug": slug, "artifact_count": count})
 
@@ -248,12 +245,32 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Create missing joins
+        # Ensure EnvironmentType rows exist for requested slugs (lazy seed safety)
         if to_create:
-            env_types = {
+            existing_types = {
                 et.slug: et
                 for et in EnvironmentType.objects.filter(slug__in=list(to_create))
             }
+            missing = to_create - set(existing_types.keys())
+            if missing:
+                name_map = {
+                    "DEV": ("Development", 0),
+                    "STAGING": ("Staging", 1),
+                    "PROD": ("Production", 2),
+                }
+                for slug in sorted(missing):
+                    nm = name_map.get(slug, (slug.title(), 99))
+                    et_obj, _ = EnvironmentType.objects.get_or_create(
+                        slug=slug,
+                        defaults={
+                            "name": nm[0],
+                            "display_order": nm[1],
+                        },
+                    )
+                    existing_types[slug] = et_obj
+            env_types = existing_types
+        # Create missing joins
+        if to_create:
             WorkspaceEnvironment.objects.bulk_create(
                 [
                     WorkspaceEnvironment(

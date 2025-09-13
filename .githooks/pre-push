@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Prevent direct pushes to protected branches
+protected_branches=(main master)
+
+current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+for b in "${protected_branches[@]}"; do
+  if [ "$current_branch" = "$b" ]; then
+    echo "❌ Direct pushes to '$b' are blocked. Create a feature branch and open a PR."
+    exit 1
+  fi
+done
+exit 0
+

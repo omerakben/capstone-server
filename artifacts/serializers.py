@@ -6,6 +6,7 @@ to/from JSON representations for API responses with dynamic field handling.
 """
 
 from rest_framework import serializers
+from django.db.models import QuerySet
 from workspaces.models import WorkspaceEnvironment
 
 from .models import Artifact, Tag
@@ -39,7 +40,9 @@ class ArtifactSerializer(serializers.ModelSerializer):
     label = serializers.CharField(required=False, allow_blank=True)
     # Tags: list of tag IDs writable, and expanded objects read-only companion
     tags = serializers.PrimaryKeyRelatedField(
-        many=True, required=False, queryset=Tag.objects.all()
+        many=True,
+        required=False,
+        queryset=Tag.objects.none(),  # Will be set dynamically
     )
     tag_objects = serializers.SerializerMethodField(read_only=True)
 
@@ -65,6 +68,39 @@ class ArtifactSerializer(serializers.ModelSerializer):
             "tags",
             "tag_objects",
         ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Set tag queryset based on workspace context
+        workspace = None
+        inst = getattr(self, "instance", None)
+        if inst is not None:
+            if hasattr(inst, "workspace"):
+                workspace = inst.workspace
+            elif isinstance(inst, (list, tuple)) and inst:
+                first = inst[0]
+                if hasattr(first, "workspace"):
+                    workspace = first.workspace
+            elif isinstance(inst, QuerySet):
+                try:
+                    first = inst.first()
+                    if first is not None and hasattr(first, "workspace"):
+                        workspace = first.workspace
+                except Exception:
+                    pass
+        if workspace is None and self.context.get("workspace"):
+            workspace = self.context.get("workspace")
+
+        if "tags" in self.fields:
+            field = self.fields["tags"]
+            # For many=True relations DRF wraps the relation as ManyRelatedField
+            target = getattr(field, "child_relation", field)
+            if workspace:
+                target.queryset = Tag.objects.filter(workspace=workspace)
+            else:
+                # Fallback: use all tags (this shouldn't happen in normal operation)
+                target.queryset = Tag.objects.all()
 
     def to_representation(self, instance):
         """
@@ -113,6 +149,32 @@ class ArtifactSerializer(serializers.ModelSerializer):
         if not tags_qs:
             return []
         return [{"id": t.id, "name": t.name} for t in tags_qs.all().order_by("name")]
+
+    def validate_tags(self, tags):
+        """Validate that all tags belong to the artifact's workspace."""
+        if not tags:
+            return tags
+
+        # Get workspace from context or instance
+        workspace = self.context.get("workspace")
+        if not workspace and self.instance:
+            workspace = self.instance.workspace
+
+        if not workspace:
+            # If no workspace context, can't validate - let the view handle it
+            return tags
+
+        workspace_id = workspace.id if hasattr(workspace, "id") else workspace
+
+        # Check all tags belong to the same workspace
+        invalid_tags = [tag for tag in tags if tag.workspace_id != workspace_id]
+
+        if invalid_tags:
+            raise serializers.ValidationError(
+                f"Tags must belong to the same workspace. Invalid tags: {[t.id for t in invalid_tags]}"
+            )
+
+        return tags
 
     def validate(self, attrs):
         """
@@ -188,12 +250,16 @@ class ArtifactSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         tags = validated_data.pop("tags", [])
         # Map slug to workspace_env
-        workspace = self.context.get("workspace") or self.initial_data.get("workspace")
+        workspace = self.context.get("workspace")
+
         ws_id = None
-        try:
-            ws_id = workspace.id if hasattr(workspace, "id") else int(workspace)
-        except Exception:
-            ws_id = None
+        if workspace:
+            ws_id = (
+                workspace.id
+                if hasattr(workspace, "id")
+                else (int(workspace) if workspace else None)
+            )
+
         self._apply_workspace_env_mapping(validated_data, ws_id)
         # Label handling
         self._apply_label_to_metadata_on_write(None, validated_data)
@@ -204,6 +270,24 @@ class ArtifactSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         tags = validated_data.pop("tags", None)
+
+        # Validate tags belong to same workspace before updating
+        if tags is not None:
+            workspace_id = instance.workspace.id
+            invalid_tags = [tag for tag in tags if tag.workspace_id != workspace_id]
+
+            if invalid_tags:
+                raise serializers.ValidationError(
+                    {
+                        "tags": f"Tags must belong to the same workspace. Invalid tags: {[t.id for t in invalid_tags]}"
+                    }
+                )
+
+        # For partial updates of ENV_VAR: treat empty string value as "no change"
+        if getattr(instance, "kind", None) == "ENV_VAR":
+            if "value" in validated_data and (validated_data.get("value") == ""):
+                validated_data.pop("value", None)
+
         # Map slug to workspace_env
         ws_id = instance.workspace.id if instance and instance.workspace_id else None
         self._apply_workspace_env_mapping(validated_data, ws_id)
@@ -218,25 +302,44 @@ class ArtifactSerializer(serializers.ModelSerializer):
 class TagSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(read_only=True)
     workspace = serializers.PrimaryKeyRelatedField(read_only=True)
+    usage_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Tag
-        fields = ["id", "name", "workspace", "created_at", "updated_at"]
+        fields = [
+            "id",
+            "name",
+            "workspace",
+            "created_at",
+            "updated_at",
+            "usage_count",
+        ]
         read_only_fields = ["created_at", "updated_at"]
 
-    def validate_key(self, value):
-        """Validate ENV_VAR key format."""
-        if value and not value.replace("_", "").replace("-", "").isalnum():
-            raise serializers.ValidationError(
-                "Key must contain only alphanumeric characters, underscores, and hyphens"
-            )
-        return value
+    def validate_name(self, value: str):
+        """Validate tag name and ensure uniqueness within the workspace.
 
-    def validate_environment(self, value):
-        """Validate environment choice."""
-        valid_environments = ["DEV", "STAGING", "PROD"]
-        if value not in valid_environments:
+        - Trim whitespace
+        - Disallow empty names
+        - Enforce uniqueness per workspace (case-insensitive)
+        """
+        name = (value or "").strip()
+        if not name:
+            raise serializers.ValidationError("Name cannot be empty")
+
+        workspace = self.context.get("workspace")
+        if workspace is None:
+            # Workspace is provided by the viewset; without it we can't enforce scope.
+            return name
+
+        qs = Tag.objects.filter(workspace=workspace)
+        # Exclude current instance when updating
+        if getattr(self, "instance", None):
+            qs = qs.exclude(pk=self.instance.pk)
+
+        if qs.filter(name__iexact=name).exists():
             raise serializers.ValidationError(
-                f'Environment must be one of: {", ".join(valid_environments)}'
+                "A tag with this name already exists in this workspace"
             )
-        return value
+
+        return name
