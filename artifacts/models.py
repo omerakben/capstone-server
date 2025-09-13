@@ -84,6 +84,14 @@ class Artifact(models.Model):
     # Metadata storage for additional fields
     metadata = models.JSONField(default=dict, blank=True)
 
+    # Many-to-Many: Tags (explicit through table for uniqueness & auditing)
+    tags = models.ManyToManyField(
+        "Tag",
+        through="ArtifactTag",
+        related_name="artifacts",
+        blank=True,
+    )
+
     class Meta:
         ordering = ["-updated_at"]
         indexes = [
@@ -166,3 +174,50 @@ class Artifact(models.Model):
         elif self.kind in ["PROMPT", "DOC_LINK"]:
             return self.title
         return f"Artifact {self.id}"
+
+    # Declared after class so Tag is defined below; patched back in via string reference if necessary.
+    # (Will be attached later if not already present by migration time.)
+
+
+class Tag(models.Model):
+    """Tag for grouping artifacts (Many-to-Many with Artifact via ArtifactTag)."""
+
+    id = models.AutoField(primary_key=True)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace", on_delete=models.CASCADE, related_name="tags"
+    )
+    name = models.CharField(max_length=80)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("workspace", "name")
+        indexes = [
+            models.Index(fields=["workspace", "name"]),
+        ]
+        ordering = ["name"]
+
+    def __str__(self):  # pragma: no cover - trivial
+        return f"{self.name}" if self.name else "Tag"
+
+
+class ArtifactTag(models.Model):
+    """Explicit through table for Artifact ↔ Tag Many-to-Many relation."""
+
+    id = models.AutoField(primary_key=True)
+    artifact = models.ForeignKey(
+        Artifact, on_delete=models.CASCADE, related_name="artifact_tags"
+    )
+    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name="artifact_tags")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("artifact", "tag")
+        indexes = [
+            models.Index(fields=["artifact", "tag"]),
+            models.Index(fields=["tag", "artifact"]),
+        ]
+        ordering = ["artifact_id", "tag_id"]
+
+    def __str__(self):  # pragma: no cover - trivial
+        return "ArtifactTag"

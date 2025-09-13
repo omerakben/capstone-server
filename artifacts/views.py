@@ -16,8 +16,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from workspaces.models import Workspace
 
-from .models import Artifact
-from .serializers import ArtifactSerializer
+from .models import Artifact, Tag
+from .serializers import ArtifactSerializer, TagSerializer
 
 
 class ArtifactViewSet(viewsets.ModelViewSet):
@@ -242,6 +242,37 @@ class ArtifactViewSet(viewsets.ModelViewSet):
             else status.HTTP_400_BAD_REQUEST
         )
         return Response(response_data, status=status_code)
+
+
+class TagViewSet(viewsets.ModelViewSet):
+    """Manage tags within a workspace (Many-to-Many for artifacts)."""
+
+    serializer_class = TagSerializer
+    permission_classes = [IsAuthenticated, IsOwner]
+    queryset = Tag.objects.none()
+
+    def get_workspace(self):
+        workspace_id = self.kwargs.get("workspace_id")
+        if not workspace_id:
+            return None
+        if hasattr(self.request.user, "uid"):
+            return get_object_or_404(
+                Workspace.objects.filter(owner_uid=self.request.user.uid),
+                id=workspace_id,
+            )
+        return None
+
+    def get_queryset(self):
+        ws = self.get_workspace()
+        if not ws:
+            return Tag.objects.none()
+        return Tag.objects.filter(workspace=ws).order_by("name")
+
+    def perform_create(self, serializer):
+        ws = self.get_workspace()
+        if not ws:
+            raise ValueError("Workspace not found or access denied")
+        serializer.save(workspace=ws)
 
     @action(detail=False, methods=["delete"])
     def bulk_delete(self, request, *args, **kwargs):

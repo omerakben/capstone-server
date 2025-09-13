@@ -8,7 +8,7 @@ to/from JSON representations for API responses with dynamic field handling.
 from rest_framework import serializers
 from workspaces.models import WorkspaceEnvironment
 
-from .models import Artifact
+from .models import Artifact, Tag
 
 
 class ArtifactSerializer(serializers.ModelSerializer):
@@ -37,6 +37,11 @@ class ArtifactSerializer(serializers.ModelSerializer):
     url = serializers.URLField(required=False, allow_blank=True)
     # Virtual field mapped to metadata for DOC_LINK label
     label = serializers.CharField(required=False, allow_blank=True)
+    # Tags: list of tag IDs writable, and expanded objects read-only companion
+    tags = serializers.PrimaryKeyRelatedField(
+        many=True, required=False, queryset=Tag.objects.all()
+    )
+    tag_objects = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Artifact
@@ -57,6 +62,8 @@ class ArtifactSerializer(serializers.ModelSerializer):
             "url",
             "metadata",
             "label",
+            "tags",
+            "tag_objects",
         ]
 
     def to_representation(self, instance):
@@ -100,6 +107,12 @@ class ArtifactSerializer(serializers.ModelSerializer):
                 data["label"] = meta.get("label")
 
         return data
+
+    def get_tag_objects(self, instance):
+        tags_qs = getattr(instance, "tags", None)
+        if not tags_qs:
+            return []
+        return [{"id": t.id, "name": t.name} for t in tags_qs.all().order_by("name")]
 
     def validate(self, attrs):
         """
@@ -173,6 +186,7 @@ class ArtifactSerializer(serializers.ModelSerializer):
             validated_data["metadata"] = meta
 
     def create(self, validated_data):
+        tags = validated_data.pop("tags", [])
         # Map slug to workspace_env
         workspace = self.context.get("workspace") or self.initial_data.get("workspace")
         ws_id = None
@@ -183,15 +197,32 @@ class ArtifactSerializer(serializers.ModelSerializer):
         self._apply_workspace_env_mapping(validated_data, ws_id)
         # Label handling
         self._apply_label_to_metadata_on_write(None, validated_data)
-        return super().create(validated_data)
+        artifact = super().create(validated_data)
+        if tags:
+            artifact.tags.set(tags)
+        return artifact
 
     def update(self, instance, validated_data):
+        tags = validated_data.pop("tags", None)
         # Map slug to workspace_env
         ws_id = instance.workspace.id if instance and instance.workspace_id else None
         self._apply_workspace_env_mapping(validated_data, ws_id)
         # Label handling
         self._apply_label_to_metadata_on_write(instance, validated_data)
-        return super().update(instance, validated_data)
+        artifact = super().update(instance, validated_data)
+        if tags is not None:
+            artifact.tags.set(tags)
+        return artifact
+
+
+class TagSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(read_only=True)
+    workspace = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Tag
+        fields = ["id", "name", "workspace", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
 
     def validate_key(self, value):
         """Validate ENV_VAR key format."""
