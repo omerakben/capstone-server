@@ -5,8 +5,8 @@ This module defines serializers for converting polymorphic artifact models
 to/from JSON representations for API responses with dynamic field handling.
 """
 
-from rest_framework import serializers
 from django.db.models import QuerySet
+from rest_framework import serializers
 from workspaces.models import WorkspaceEnvironment
 
 from .models import Artifact, Tag
@@ -181,6 +181,7 @@ class ArtifactSerializer(serializers.ModelSerializer):
         Type-specific validation based on artifact kind.
 
         Ensures required fields are present and valid for each artifact type.
+        Also checks uniqueness constraints to provide better error messages.
         """
         kind = attrs.get("kind")
 
@@ -189,6 +190,33 @@ class ArtifactSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"key": "ENV_VAR requires a key"})
             if not attrs.get("value"):
                 raise serializers.ValidationError({"value": "ENV_VAR requires a value"})
+
+            # Check uniqueness constraint for ENV_VAR
+            workspace = self.context.get("workspace")
+            if workspace:
+                key = attrs.get("key")
+                environment = attrs.get("environment")
+                workspace_id = workspace.id if hasattr(workspace, "id") else workspace
+
+                # Build queryset for existing artifacts with same key/env/workspace
+                existing_qs = Artifact.objects.filter(
+                    workspace_id=workspace_id,
+                    kind="ENV_VAR",
+                    key=key,
+                    environment=environment,
+                )
+
+                # Exclude current instance if updating
+                if self.instance:
+                    existing_qs = existing_qs.exclude(id=self.instance.id)
+
+                if existing_qs.exists():
+                    raise serializers.ValidationError(
+                        {
+                            "key": f"An environment variable with key '{key}' already exists in {environment} environment."
+                        }
+                    )
+
             # Clear unused fields
             attrs.pop("title", None)
             attrs.pop("content", None)
@@ -197,6 +225,32 @@ class ArtifactSerializer(serializers.ModelSerializer):
         elif kind == "PROMPT":
             if not attrs.get("title"):
                 raise serializers.ValidationError({"title": "PROMPT requires a title"})
+
+            # Check uniqueness constraint for PROMPT
+            workspace = self.context.get("workspace")
+            if workspace:
+                title = attrs.get("title")
+                environment = attrs.get("environment")
+                workspace_id = workspace.id if hasattr(workspace, "id") else workspace
+
+                existing_qs = Artifact.objects.filter(
+                    workspace_id=workspace_id,
+                    kind="PROMPT",
+                    title=title,
+                    environment=environment,
+                )
+
+                # Exclude current instance if updating
+                if self.instance:
+                    existing_qs = existing_qs.exclude(id=self.instance.id)
+
+                if existing_qs.exists():
+                    raise serializers.ValidationError(
+                        {
+                            "title": f"A prompt with title '{title}' already exists in {environment} environment."
+                        }
+                    )
+
             # Clear unused fields
             attrs.pop("key", None)
             attrs.pop("value", None)
@@ -209,6 +263,32 @@ class ArtifactSerializer(serializers.ModelSerializer):
                 )
             if not attrs.get("url"):
                 raise serializers.ValidationError({"url": "DOC_LINK requires a URL"})
+
+            # Check uniqueness constraint for DOC_LINK
+            workspace = self.context.get("workspace")
+            if workspace:
+                title = attrs.get("title")
+                environment = attrs.get("environment")
+                workspace_id = workspace.id if hasattr(workspace, "id") else workspace
+
+                existing_qs = Artifact.objects.filter(
+                    workspace_id=workspace_id,
+                    kind="DOC_LINK",
+                    title=title,
+                    environment=environment,
+                )
+
+                # Exclude current instance if updating
+                if self.instance:
+                    existing_qs = existing_qs.exclude(id=self.instance.id)
+
+                if existing_qs.exists():
+                    raise serializers.ValidationError(
+                        {
+                            "title": f"A documentation link with title '{title}' already exists in {environment} environment."
+                        }
+                    )
+
             # Clear unused fields
             attrs.pop("key", None)
             attrs.pop("value", None)
@@ -334,7 +414,7 @@ class TagSerializer(serializers.ModelSerializer):
 
         qs = Tag.objects.filter(workspace=workspace)
         # Exclude current instance when updating
-        if getattr(self, "instance", None):
+        if getattr(self, "instance", None) and self.instance:
             qs = qs.exclude(pk=self.instance.pk)
 
         if qs.filter(name__iexact=name).exists():
