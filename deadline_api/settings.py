@@ -32,13 +32,16 @@ SECRET_KEY = config(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
+# Demo mode for public deployment without Firebase
+DEMO_MODE = config("DEMO_MODE", default=False, cast=bool)
+
 ALLOWED_HOSTS = config(
     "ALLOWED_HOSTS",
     default="localhost,127.0.0.1,testserver",
     cast=lambda x: [item.strip() for item in x.split(",")],
 )
 
-# CORS settings for local development with React frontend
+# CORS settings for local development and production
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -48,6 +51,11 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3002",
     "http://127.0.0.1:3002",
 ]
+
+# Add Vercel domain if configured
+VERCEL_FRONTEND_URL = config("VERCEL_FRONTEND_URL", default="")
+if VERCEL_FRONTEND_URL:
+    CORS_ALLOWED_ORIGINS.append(VERCEL_FRONTEND_URL)
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -74,11 +82,13 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # Static files for production
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "auth_firebase.demo_middleware.DemoModeAuthenticationMiddleware",  # Demo mode support
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -106,11 +116,14 @@ WSGI_APPLICATION = "deadline_api.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+import dj_database_url
+
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+    "default": dj_database_url.config(
+        default="sqlite:///" + str(BASE_DIR / "db.sqlite3"),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
 }
 
 
@@ -149,6 +162,17 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# WhiteNoise configuration for static files in production
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

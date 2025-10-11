@@ -122,3 +122,6 @@ dmypy.json
 *.temp
 temp/
 tmp/
+
+# Railway
+.railway/

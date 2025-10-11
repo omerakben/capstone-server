@@ -16,3 +16,13 @@ django-debug-toolbar>=4.2.0
 
 # API Documentation
 drf-spectacular>=0.26.0
+
+# Production Server
+gunicorn==21.2.0
+
+# PostgreSQL Database
+psycopg2-binary==2.9.9
+dj-database-url==2.1.0
+
+# Static Files
+whitenoise==6.6.0
