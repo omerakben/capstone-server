@@ -258,10 +258,20 @@ try:  # Initialize Firebase Admin SDK
 
     if len(firebase_admin._apps) == 0:  # pylint: disable=protected-access
         cred = None
-        if FIREBASE_CREDENTIALS_FILE and os.path.exists(FIREBASE_CREDENTIALS_FILE):
+
+        # Priority 1: Check for runtime-generated credentials file (Railway production)
+        runtime_creds_path = "/tmp/firebase-credentials.json"
+        if os.path.exists(runtime_creds_path):
+            cred = credentials.Certificate(runtime_creds_path)
+            logger.info("Using Firebase credentials from %s", runtime_creds_path)
+        # Priority 2: Check for explicitly configured credentials file (local dev)
+        elif FIREBASE_CREDENTIALS_FILE and os.path.exists(FIREBASE_CREDENTIALS_FILE):
             cred = credentials.Certificate(FIREBASE_CREDENTIALS_FILE)
+            logger.info("Using Firebase credentials from %s", FIREBASE_CREDENTIALS_FILE)
+        # Priority 3: Try environment variables (fallback, may have formatting issues)
         elif FIREBASE_CONFIG.get("project_id"):
             cred = credentials.Certificate(FIREBASE_CONFIG)
+            logger.info("Using Firebase credentials from environment variables")
 
         if cred is not None:
             firebase_admin.initialize_app(cred)
