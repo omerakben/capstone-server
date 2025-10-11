@@ -1,1 +1,1 @@
-web: python3 create_firebase_credentials.py && gunicorn deadline_api.wsgi:application --bind 0.0.0.0:$PORT --workers 2
+web: python3 manage.py migrate --noinput && python3 manage.py populate_demo_workspace && gunicorn deadline_api.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120 --access-logfile - --error-logfile -
